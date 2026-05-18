@@ -10,13 +10,14 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/quantumsheep/range-parser v1.1.0
+	github.com/redis/go-redis/v9 v9.19.0
 	github.com/spf13/cobra v1.8.0
 )
 
 require (
 	github.com/AnimeKaizoku/cacher v1.0.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chenzhuoyu/iasm v0.9.1 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
@@ -73,7 +74,7 @@ require (
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gotd/contrib v0.19.0
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdp/qrterminal v1.0.1

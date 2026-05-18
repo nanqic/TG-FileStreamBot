@@ -5,24 +5,35 @@ import (
 	"EverythingSuckz/fsb/internal/stream"
 	"EverythingSuckz/fsb/internal/types"
 	"EverythingSuckz/fsb/internal/utils"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gotd/td/tg"
 	range_parser "github.com/quantumsheep/range-parser"
 	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 var log *zap.Logger
+
+// 全局初始化 Redis 客户端 (默认连本地 6379 端口，db 0)
+var rdb = redis.NewClient(&redis.Options{
+	Addr: "localhost:6379",
+})
+var redisCtx = context.Background()
 
 func (e *allRoutes) LoadHome(r *Route) {
 	log = e.log.Named("Stream")
 	defer log.Info("Loaded stream route")
 	r.Engine.GET("/stream/:messageID", getStreamRoute)
+	r.Engine.GET("/v/:filename", StreamByFileName)
 }
 
 func getStreamRoute(ctx *gin.Context) {
@@ -139,4 +150,50 @@ func getStreamRoute(ctx *gin.Context) {
 			}
 		}
 	}
+}
+
+// StreamByFileName 处理 /v/:filename 的请求
+func StreamByFileName(c *gin.Context) {
+	// 1. 获取 URL 中的文件名，例如 "S0107.mp4" 或 "S0107"
+	filename := c.Param("filename")
+
+	// 2. 去除后缀名，拿到纯编号 "S0107"，以匹配 Redis 中的 Key
+	nameOnly := strings.TrimSuffix(filename, filepath.Ext(filename))
+	redisKey := "vid:" + nameOnly
+
+	// 3. 从 Redis 查询对应的 Message ID
+	msgIDStr, err := rdb.Get(redisCtx, redisKey).Result()
+	if err == redis.Nil {
+		c.String(http.StatusNotFound, "Video mapping not found in Redis")
+		return
+	} else if err != nil {
+		c.String(http.StatusInternalServerError, "Redis query error")
+		return
+	}
+
+	messageID, err := strconv.Atoi(msgIDStr)
+	if err != nil {
+		c.String(http.StatusBadRequest, "Invalid message ID in Redis")
+		return
+	}
+
+	// 4. 获取文件信息以生成正确的 Hash 校验参数
+	worker := bot.GetNextWorker()
+	file, err := utils.FileFromMessage(c, worker.Client, messageID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to fetch file info from Telegram: "+err.Error())
+		return
+	}
+
+	expectedHash := utils.PackFile(
+		file.FileName,
+		file.FileSize,
+		file.MimeType,
+		file.ID,
+	)
+	hash := utils.GetShortHash(expectedHash)
+
+	// 5. 核心：直接 302 重定向到带 Hash 校验的原生播放路由
+	targetURL := fmt.Sprintf("/stream/%d?hash=%s", messageID, hash)
+	c.Redirect(http.StatusFound, targetURL)
 }
