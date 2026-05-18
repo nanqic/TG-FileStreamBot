@@ -74,6 +74,28 @@ func getStreamRoute(ctx *gin.Context) {
 		return
 	}
 
+	title := ctx.Query("title")
+	var filename string
+	disposition := "inline"
+	if title != "" {
+		disposition = "attachment"
+		title = strings.ReplaceAll(title, "\"", "_")
+		title = strings.ReplaceAll(title, "\r", "")
+		title = strings.ReplaceAll(title, "\n", "")
+
+		ext := filepath.Ext(file.FileName)
+		if ext != "" && !strings.HasSuffix(strings.ToLower(title), strings.ToLower(ext)) {
+			filename = title + ext
+		} else {
+			filename = title
+		}
+	} else {
+		filename = file.FileName
+		if ctx.Query("d") == "true" {
+			disposition = "attachment"
+		}
+	}
+
 	// for photo messages
 	if file.FileSize == 0 {
 		res, err := worker.Client.API().UploadGetFile(ctx, &tg.UploadGetFileRequest{
@@ -91,7 +113,7 @@ func getStreamRoute(ctx *gin.Context) {
 			return
 		}
 		fileBytes := result.GetBytes()
-		ctx.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", file.FileName))
+		ctx.Header("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
 		if r.Method != "HEAD" {
 			ctx.Data(http.StatusOK, file.MimeType, fileBytes)
 		}
@@ -129,13 +151,7 @@ func getStreamRoute(ctx *gin.Context) {
 	ctx.Header("Content-Type", mimeType)
 	ctx.Header("Content-Length", strconv.FormatInt(contentLength, 10))
 
-	disposition := "inline"
-
-	if ctx.Query("d") == "true" {
-		disposition = "attachment"
-	}
-
-	ctx.Header("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, file.FileName))
+	ctx.Header("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, filename))
 
 	if r.Method != "HEAD" {
 		pipe, err := stream.NewStreamPipe(ctx, worker.Client, file.Location, start, end, log)
@@ -194,6 +210,8 @@ func StreamByFileName(c *gin.Context) {
 	hash := utils.GetShortHash(expectedHash)
 
 	// 5. 核心：直接 302 重定向到带 Hash 校验的原生播放路由
-	targetURL := fmt.Sprintf("/stream/%d?hash=%s", messageID, hash)
+	q := c.Request.URL.Query()
+	q.Set("hash", hash)
+	targetURL := fmt.Sprintf("/stream/%d?%s", messageID, q.Encode())
 	c.Redirect(http.StatusFound, targetURL)
 }
