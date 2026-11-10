@@ -57,6 +57,15 @@ type config struct {
 	StreamBufferCount int `envconfig:"STREAM_BUFFER_COUNT" default:"8"`
 	StreamTimeoutSec  int `envconfig:"STREAM_TIMEOUT_SEC" default:"30"`
 	StreamMaxRetries  int `envconfig:"STREAM_MAX_RETRIES" default:"3"`
+
+	// redis (used by /v/:filename mapping)
+	RedisAddr     string `envconfig:"REDIS_ADDR" default:"localhost:6379"`
+	RedisPassword string `envconfig:"REDIS_PASSWORD"`
+	RedisDB       int    `envconfig:"REDIS_DB" default:"0"`
+
+	// exit the process after this many consecutive Telegram connection errors
+	// on the same client, so a supervisor (systemd/docker) restarts it. 0 disables.
+	TGErrorExitThreshold int `envconfig:"TG_ERROR_EXIT_THRESHOLD" default:"5"`
 }
 
 var botTokenRegex = regexp.MustCompile(`MULTI\_TOKEN\d+=(.*)`)
@@ -230,6 +239,9 @@ func Load(log *zap.Logger, cmd *cobra.Command) {
 	if ValueOf.StreamMaxRetries <= 0 {
 		log.Sugar().Info("STREAM_MAX_RETRIES must be greater than 0, defaulting to 3")
 		ValueOf.StreamMaxRetries = 3
+	}
+	if ValueOf.TGErrorExitThreshold < 0 {
+		ValueOf.TGErrorExitThreshold = 0
 	}
 }
 

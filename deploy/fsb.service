@@ -1,0 +1,28 @@
+[Unit]
+Description=Telegram File Stream Bot (fsb)
+Documentation=https://github.com/EverythingSuckz/TG-FileStreamBot
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# fsb.env / fsb.session / sessions/ / logs/ 都按工作目录解析
+WorkingDirectory=/opt/fsb
+ExecStart=/opt/fsb/fsb-linux-amd64 run
+
+# 进程退出（包括连续 Telegram 连接错误触发的主动退出）后自动拉起
+Restart=always
+RestartSec=5
+# 10 分钟内最多重启 10 次，超过就停住，避免配置错误时无限重启刷日志
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+# 定期重启刷新与 Telegram 的连接（可选，按需开启）
+# RuntimeMaxSec=7d
+
+# 资源与安全
+LimitNOFILE=65535
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

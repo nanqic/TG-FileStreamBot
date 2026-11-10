@@ -40,6 +40,9 @@ func IsClientDisconnectError(err error) bool {
 		strings.Contains(errStr, "forcibly closed")
 }
 
+// ErrFileDeleted means the message doesn't exist (anymore) in the log channel.
+var ErrFileDeleted = errors.New("this file was deleted")
+
 // telegram helper functions
 // TODO: move these to a separate package if they grow too large
 
@@ -51,16 +54,22 @@ func GetTGMessage(ctx context.Context, client *gotgproto.Client, messageID int) 
 	}
 	messageRequest := tg.ChannelsGetMessagesRequest{Channel: channel, ID: []tg.InputMessageClass{inputMessageID}}
 	res, err := client.API().ChannelsGetMessages(ctx, &messageRequest)
+	ReportTGResult(client.Self.ID, err)
 	if err != nil {
 		return nil, err
 	}
-	messages := res.(*tg.MessagesChannelMessages)
-	message := messages.Messages[0]
-	if _, ok := message.(*tg.Message); ok {
-		return message.(*tg.Message), nil
-	} else {
-		return nil, fmt.Errorf("this file was deleted")
+	messages, ok := res.(*tg.MessagesChannelMessages)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type %T", res)
 	}
+	if len(messages.Messages) == 0 {
+		return nil, ErrFileDeleted
+	}
+	message, ok := messages.Messages[0].(*tg.Message)
+	if !ok {
+		return nil, ErrFileDeleted
+	}
+	return message, nil
 }
 
 func FileFromMedia(media tg.MessageMediaClass) (*types.File, error) {

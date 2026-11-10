@@ -260,6 +260,7 @@ func (p *StreamPipe) downloadBlockWithRetry(offset int64) ([]byte, error) {
 			return p.downloadBlock(ctx, offset)
 		})
 		cancel()
+		utils.ReportTGResult(p.client.Self.ID, err)
 
 		if err == nil {
 			return data, nil

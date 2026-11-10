@@ -27,8 +27,17 @@ var runCmd = &cobra.Command{
 var startTime time.Time = time.Now()
 
 func runApp(cmd *cobra.Command, args []string) {
+	// fsb.env / fsb.session / logs are resolved relative to the working directory.
+	// If fsb.env isn't here but sits next to the binary, switch to that directory
+	// so `/opt/fsb/fsb-linux-amd64 run` works from anywhere.
+	workDir, workDirErr := utils.EnsureWorkDir()
 	// initialize logger early so config loading is logged to file
 	utils.InitLogger(false)
+	if workDirErr != nil {
+		utils.Logger.Sugar().Warnf("Failed to switch working directory: %v", workDirErr)
+	} else if workDir != "" {
+		utils.Logger.Sugar().Infof("fsb.env not found in current directory, switched to %s", workDir)
+	}
 	config.Load(utils.Logger, cmd)
 	// reinitialize with correct dev mode
 	utils.InitLogger(config.ValueOf.Dev)

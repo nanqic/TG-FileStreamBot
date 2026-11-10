@@ -1,11 +1,13 @@
 package routes
 
 import (
+	"EverythingSuckz/fsb/config"
 	"EverythingSuckz/fsb/internal/bot"
 	"EverythingSuckz/fsb/internal/stream"
 	"EverythingSuckz/fsb/internal/types"
 	"EverythingSuckz/fsb/internal/utils"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,15 +25,17 @@ import (
 
 var log *zap.Logger
 
-// 全局初始化 Redis 客户端 (默认连本地 6379 端口，db 0)
-var rdb = redis.NewClient(&redis.Options{
-	Addr: "localhost:6379",
-})
-var redisCtx = context.Background()
+// Redis 客户端，在 LoadHome 里按配置初始化（REDIS_ADDR / REDIS_PASSWORD / REDIS_DB）
+var rdb *redis.Client
 
 func (e *allRoutes) LoadHome(r *Route) {
 	log = e.log.Named("Stream")
 	defer log.Info("Loaded stream route")
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     config.ValueOf.RedisAddr,
+		Password: config.ValueOf.RedisPassword,
+		DB:       config.ValueOf.RedisDB,
+	})
 	r.Engine.GET("/stream/:messageID", getStreamRoute)
 	r.Engine.GET("/v/:filename", StreamByFileName)
 }
@@ -53,13 +57,11 @@ func getStreamRoute(ctx *gin.Context) {
 		return
 	}
 
-	worker := bot.GetNextWorker()
-
-	file, err := utils.TimeFuncWithResult(log, "FileFromMessage", func() (*types.File, error) {
-		return utils.FileFromMessage(ctx, worker.Client, messageID)
+	file, worker, err := utils.TimeFuncWithResult2(log, "FileFromMessage", func() (*types.File, *bot.Worker, error) {
+		return fetchFile(ctx, messageID)
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), fileErrorStatus(err, http.StatusBadRequest))
 		return
 	}
 
@@ -178,7 +180,7 @@ func StreamByFileName(c *gin.Context) {
 	redisKey := "vid:" + nameOnly
 
 	// 3. 从 Redis 查询对应的 Message ID
-	msgIDStr, err := rdb.Get(redisCtx, redisKey).Result()
+	msgIDStr, err := rdb.Get(c.Request.Context(), redisKey).Result()
 	if err == redis.Nil {
 		c.String(http.StatusNotFound, "Video mapping not found in Redis")
 		return
@@ -194,10 +196,9 @@ func StreamByFileName(c *gin.Context) {
 	}
 
 	// 4. 获取文件信息以生成正确的 Hash 校验参数
-	worker := bot.GetNextWorker()
-	file, err := utils.FileFromMessage(c, worker.Client, messageID)
+	file, _, err := fetchFile(c, messageID)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to fetch file info from Telegram: "+err.Error())
+		c.String(fileErrorStatus(err, http.StatusInternalServerError), "Failed to fetch file info from Telegram: "+err.Error())
 		return
 	}
 
@@ -214,4 +215,40 @@ func StreamByFileName(c *gin.Context) {
 	q.Set("hash", hash)
 	targetURL := fmt.Sprintf("/stream/%d?%s", messageID, q.Encode())
 	c.Redirect(http.StatusFound, targetURL)
+}
+
+// fetchFile 取文件信息。遇到 Telegram 连接类错误（如 CONNECTION_NOT_INITED）时，
+// 换下一个 worker 重试，直到所有 worker 都试过；其他错误直接返回。
+func fetchFile(ctx context.Context, messageID int) (*types.File, *bot.Worker, error) {
+	attempts := len(bot.Workers.Bots)
+	if attempts == 0 {
+		return nil, nil, errors.New("no bot workers available")
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		worker := bot.GetNextWorker()
+		file, err := utils.FileFromMessage(ctx, worker.Client, messageID)
+		if err == nil {
+			return file, worker, nil
+		}
+		lastErr = err
+		if !utils.IsTGConnectionError(err) || ctx.Err() != nil {
+			break
+		}
+		log.Warn("Telegram connection error, trying next worker",
+			zap.Int("workerID", worker.ID), zap.Int("messageID", messageID), zap.Error(err))
+	}
+	return nil, nil, lastErr
+}
+
+// fileErrorStatus 把取文件信息的错误映射成 HTTP 状态码。
+func fileErrorStatus(err error, fallback int) int {
+	switch {
+	case errors.Is(err, utils.ErrFileDeleted):
+		return http.StatusNotFound
+	case utils.IsTGConnectionError(err):
+		return http.StatusServiceUnavailable
+	default:
+		return fallback
+	}
 }
