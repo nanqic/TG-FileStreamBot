@@ -31,3 +31,5 @@ dist/
 # logs folder
 logs/
 *.log
+
+fsb-linux-amd64
